@@ -53,10 +53,10 @@
 
 
 (defn deploy-district-registry! [default-opts]
-  (deploy-smart-contract! :district-registry (merge default-opts {:gas 1000000})))
+  (deploy-smart-contract! :district-registry (merge default-opts {:gas 2700000})))
 
 (defn deploy-param-change-registry! [default-opts]
-  (deploy-smart-contract! :param-change-registry (merge default-opts {:gas 1700000})))
+  (deploy-smart-contract! :param-change-registry (merge default-opts {:gas 2700000})))
 
 (defn deploy-district-registry-fwd! [default-opts]
   (deploy-smart-contract! :district-registry-fwd (merge default-opts {:gas 500000

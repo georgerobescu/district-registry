@@ -36,10 +36,10 @@
 (def info-text "smart-contract event")
 (def error-text "smart-contract event error")
 
-(defn get-ipfs-data [hash & [default]]
+(defn get-ipfs-meta [hash & [default]]
   (js/Promise.
     (fn [resolve reject]
-      (log/info (str "Downloading: " "/ipfs/" hash) ::get-ipfs-data)
+      (log/info (str "Downloading: " "/ipfs/" hash) ::get-ipfs-meta)
       (ifiles/fget (str "/ipfs/" hash)
         {:req-opts {:compress false}}
         (fn [err content]
@@ -55,7 +55,7 @@
                 resolve)
               (throw (js/Error. (str (or err "Error") " when downloading " "/ipfs/" hash ))))
             (catch :default e
-              (log/error error-text {:error (ex-message e)} ::get-ipfs-data)
+              (log/error error-text {:error (ex-message e)} ::get-ipfs-meta)
               (when goog.DEBUG
                 (resolve default)))))))))
 
@@ -70,38 +70,51 @@
 ;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- add-registry-entry [registry-entry timestamp]
-  (db/insert-registry-entry! (merge
-                               (registry-entry/load-registry-entry registry-entry)
+  (db/insert-registry-entry! (merge registry-entry
                                {:reg-entry/created-on timestamp})))
 
-(defn- add-param-change [registry-entry]
-  (let [{:keys [:param-change/key :param-change/db] :as param-change} (param-change/load-param-change registry-entry)
-        {:keys [:initial-param/value] :as initial-param} (db/get-initial-param key db)]
+(defn- add-param-change [{:keys [:param-change/key :param-change/db] :as param-change}]
+  (let [{:keys [:initial-param/value] :as initial-param} (db/get-initial-param key db)]
     (db/insert-or-replace-param-change! (assoc param-change :param-change/initial-value value))))
 
 (defmulti process-event (fn [contract-type ev done-chan] [contract-type (:event-type ev)]))
+;; (version, creator, metaHash, deposit, challengePeriodEnd, dntWeight)
 
 (defmethod process-event [:contract/district :constructed]
-  [contract-type {:keys [:registry-entry :timestamp] :as ev} done-chan]
+  [contract-type
+   {:keys [:registry-entry :timestamp :creator :meta-hash
+           :version :deposit :challenge-period-end
+           :dnt-weight] :as ev}
+   done-chan]
   (try-catch
-    (add-registry-entry registry-entry timestamp)
-    (let [{:keys [:reg-entry/creator]} (registry-entry/load-registry-entry registry-entry)
-          {:keys [:district/info-hash] :as district} (district/load-district registry-entry)]
-      (.then (get-ipfs-data info-hash {:name "Dummy district name" ;;TODO
-                                       :description "dummy description"
-                                       :url "dummy url"
-                                       :github-url "dummy gh url"
-                                       :logo-image-hash "dummy logo hash"
-                                       :background-image-hash "dummy background hash"})
-        (fn [district-info]
-          (try-catch
-            (->> district-info
-              (map (fn [[k v]]
-                     [(keyword "district" (name k))
-                      v]))
-              (into district)
-              (db/insert-district!)))
-          (a/close! done-chan))))))
+    (let [registry-entry-data {:reg-entry/address registry-entry
+                               :reg-entry/creator creator
+                              :reg-entry/version version
+                              :reg-entry/created-on timestamp
+                              :reg-entry/deposit (bn/number deposit)
+                              :reg-entry/challenge-period-end (bn/number challenge-period-end)}
+         district {:reg-entry/address registry-entry
+                   :district/meta-hash (web3/to-ascii meta-hash)
+                   :district/dnt-weight (.toNumber dnt-weight)
+                   :district/dnt-staked 0
+                   :district/total-supply 0}]
+     (add-registry-entry registry-entry-data timestamp)
+     (let [{:keys [:district/meta-hash]} district]
+       (.then (get-ipfs-meta meta-hash {:name "Dummy district name" ;;TODO
+                                        :description "dummy description"
+                                        :url "dummy url"
+                                        :github-url "dummy gh url"
+                                        :logo-image-hash "dummy logo hash"
+                                        :background-image-hash "dummy background hash"})
+         (fn [district-meta]
+           (try-catch
+             (->> district-meta
+               (map (fn [[k v]]
+                      [(keyword "district" (name k))
+                       v]))
+               (into district)
+               (db/insert-district!)))
+           (a/close! done-chan)))))))
 
 (defmethod process-event [:contract/param-change :constructed]
   [contract-type {:keys [:registry-entry :timestamp] :as ev} done-chan]
@@ -126,7 +139,7 @@
                               :challenge/index challenge-index))
       (db/update-registry-entry! {:reg-entry/current-challenge-index challenge-index
                                   :reg-entry/address registry-entry})
-      (.then (get-ipfs-data (:challenge/meta-hash challenge) {:comment "Dummy comment"})
+      (.then (get-ipfs-meta (:challenge/meta-hash challenge) {:comment "Dummy comment"})
         (fn [challenge-meta]
           (try-catch
             (db/update-challenge! (assoc challenge
@@ -219,8 +232,22 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; End of events processors ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn enqueue-event [queue contract-type event-type err {:keys [args event] :as a}]
+  (let [ev (-> args
+             (assoc :contract-address (:address a))
+             (assoc :event-type event-type)
+             (update :timestamp (fn [ts]
+                                  (if ts
+                                    (bn/number ts)
+                                    1 #_(server-utils/now-in-seconds))))
+             (update :version bn/number))]
+    (log/info (str "Enqueueing" " " info-text " " contract-type " " event-type) {:ev ev} ::dispatch-event)
+    (a/put! queue [contract-type ev])
+    #_(process-event contract-type ev)))
 
+#_
 (defn enqueue-event [queue contract-type err {:keys [args event] :as a}]
+  (prn "ENQ EVT" contract-type err a)
   (try-catch
     (let [event-type (cond
                        (:event-type args) (cs/->kebab-case-keyword (web3-utils/bytes32->str (:event-type args)))
@@ -230,7 +257,7 @@
                (assoc :event-type event-type)
                (update :timestamp bn/number)
                (update :version bn/number))]
-      (log/info (str "Enqueueing" " " info-text " " contract-type " " event-type) {:ev ev} ::dispatch-event)
+      (log/info (str "Enqueueing" " " info-text " " contract-type " " event-type) {:ev ev} ::enqueue-event)
       (a/put! queue [contract-type ev]))))
 
 (defn start [{:keys [:initial-param-query] :as opts}]
@@ -256,14 +283,20 @@
                            (when (= result :timeout)
                              (log/warn (str "Timed out "  info-text " " contract-type " " (:event-type event)) {:event event} ::timeout-event)))
                          (recur))))
-        watchers [{:watcher (partial eternal-db/change-applied-event :param-change-registry-db)
-                   :on-event (partial enqueue-event event-queue :contract/eternal-db)}
-                  {:watcher (partial eternal-db/change-applied-event :district-registry-db)
-                   :on-event (partial enqueue-event event-queue :contract/eternal-db)}
-                  {:watcher (partial registry/registry-entry-event [:district-registry :district-registry-fwd])
-                   :on-event (partial enqueue-event event-queue :contract/district)}
-                  {:watcher (partial registry/registry-entry-event [:param-change-registry :param-change-registry-fwd])
-                   :on-event (partial enqueue-event event-queue :contract/param-change)}]
+        watchers [
+                  {:watcher (partial registry/district-constructed-event [:district-registry :district-registry-fwd])
+                   :on-event (partial enqueue-event event-queue :contract/district :constructed)}
+
+                  ;; {:watcher (partial eternal-db/change-applied-event :param-change-registry-db)
+                  ;;  :on-event (partial enqueue-event event-queue :contract/eternal-db)}
+                  ;; {:watcher (partial eternal-db/change-applied-event :district-registry-db)
+                  ;;  :on-event (partial enqueue-event event-queue :contract/eternal-db)}
+                  ;; {:watcher (partial registry/registry-entry-event [:district-registry :district-registry-fwd])
+                  ;;  :on-event (partial enqueue-event event-queue :contract/district)}
+                  ;; {:watcher (partial registry/registry-entry-event [:param-change-registry :param-change-registry-fwd])
+                  ;;  :on-event (partial enqueue-event event-queue :contract/param-change)}
+
+                  ]
         watchers (concat
                    ;; Replay every past events (from block 0 to (dec last-block-number))
                    (when (pos? last-block-number)

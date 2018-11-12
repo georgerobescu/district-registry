@@ -3,6 +3,7 @@ pragma solidity ^0.4.24;
 import "./RegistryEntry.sol"; 
 import "math/Power.sol";
 import "token/stakebank/StakeBank.sol";
+import "token/minime/MiniMeToken.sol";
 
 /**
  * @title Contract created for each submitted District into the DistrictFactory TCR.
@@ -18,7 +19,7 @@ contract District is RegistryEntry, MiniMeToken, StakeBank, Power
   /** 
    * @dev IPFS hash of file that contains all data from form fields
    */
-  bytes public infoHash;
+  bytes public metaHash;
 
 
   /**
@@ -40,12 +41,12 @@ contract District is RegistryEntry, MiniMeToken, StakeBank, Power
 
    * @param _creator Creator of a district
    * @param _version Version of District contract
-   * @param _infoHash IPFS hash of data related to a district
+   * @param _metaHash IPFS hash of data related to a district
    */
   function construct(
     address _creator,
     uint _version,
-    bytes _infoHash,
+    bytes _metaHash,
     uint32 _dntWeight
   )
   public
@@ -69,16 +70,17 @@ contract District is RegistryEntry, MiniMeToken, StakeBank, Power
 
     challengePeriodEnd = ~uint(0);
 
-    infoHash = _infoHash;
+    metaHash = _metaHash;
 
     require(_dntWeight >= 1 && _dntWeight <= MAX_WEIGHT);
     dntWeight = _dntWeight;
+    registry.fireDistrictConstructedEvent(version, creator, metaHash, deposit, challengePeriodEnd, dntWeight);
   }
 
-  function setInfoHash(bytes _infoHash) public
+  function setMetaHash(bytes _metaHash) public
   {
     require(msg.sender == creator);
-    infoHash = _infoHash;
+    metaHash = _metaHash;
   }
 
   /**
@@ -144,7 +146,7 @@ contract District is RegistryEntry, MiniMeToken, StakeBank, Power
 
     var eventData = new uint[](1);
     eventData[0] = uint(_user);
-    registry.fireRegistryEntryEvent("staked", version, eventData);
+    // registry.fireRegistryEntryEvent("staked", version, eventData);
   }
 
   function stake(uint256 _amount, bytes _data) public {
@@ -165,35 +167,28 @@ contract District is RegistryEntry, MiniMeToken, StakeBank, Power
 
     var eventData = new uint[](1);
     eventData[0] = uint(msg.sender);
-    registry.fireRegistryEntryEvent("unstaked", version, eventData);
+    // registry.fireRegistryEntryEvent("unstaked", version, eventData);
   }
 
-  struct StakeDelta {
-    uint creationBlock;
-    int delta;
-    mapping(address => int) deltas;
-  }
-
-  StakeDelta[] public stakeDeltas;
-
+ 
   function maybeAdjustStakeDelta(
     address _voter,
     int _amount
   )
-  private
+  internal
   {
-    if (isVoteCommitPeriodActive()) {
+    if (challenges.length != 0 && currentChallenge().isVoteCommitPeriodActive()) {
       uint idx = currentChallengeIndex();
-      stakeDeltas[idx].delta += _amount;
-      stakeDeltas[idx].deltas[_voter] += _amount;
+      challenges[idx].stakeDelta += _amount;
+      challenges[idx].stakeDeltas[_voter] += _amount;
     }
   }
 
-  function wasChallenged() public constant returns (bool) {
-    if (challenges.length == 0) {
-      return false;
-    }
-    return currentChallenge().revealPeriodEnd > now;
+  function isChallengeable() internal constant returns (bool) {
+    return isChallengePeriodActive() && (
+      challenges.length == 0 ||
+      currentChallenge().status() == RegistryEntryLib.Status.Whitelisted
+      );
   }
 
   function createChallenge(
@@ -203,41 +198,35 @@ contract District is RegistryEntry, MiniMeToken, StakeBank, Power
   public
   {
     super.createChallenge(_challenger, _challengeMetaHash);
-    StakeDelta memory sd;
-    sd.creationBlock = block.number;
-    stakeDeltas.push(sd);
+
   }
 
-  function votesIncludeNth(uint _challengeIndex) internal view returns (uint) {
-    return uint(int(challenges[_challengeIndex].votesInclude) + stakeDeltas[_challengeIndex].delta);
-  }
+  // function votesIncludeNth(uint _challengeIndex) internal view returns (uint) {
+  //   return uint(int(challenges[_challengeIndex].votesInclude) + stakeDeltas[_challengeIndex].delta);
+  // }
 
-  function voterVotesIncludeNth(uint _challengeIndex, address _voter) public constant returns (uint) {
-    int votes = int(super.voterVotesIncludeNth(_challengeIndex, _voter));
-    return uint(votes + stakeDeltas[_challengeIndex].deltas[_voter]);
-  }
-
-  function claimCreatorRewardNth(uint _challengeIndex) public {
-    revert();
-  }
+  // function voterVotesIncludeNth(uint _challengeIndex, address _voter) public constant returns (uint) {
+  //   int votes = int(super.voterVotesIncludeNth(_challengeIndex, _voter));
+  //   return uint(votes + stakeDeltas[_challengeIndex].deltas[_voter]);
+  // }
 
   /**
    * @dev Returns all state related to this contract for simpler offchain access
    */
-  function loadDistrict() public constant returns (bytes, uint32, uint, uint) {
-    return (
-      infoHash,
-      dntWeight,
-      totalStaked(),
-      totalSupply()
-    );
-  }
+  // function loadDistrict() public constant returns (bytes, uint32, uint, uint) {
+  //   return (
+  //     metaHash,
+  //     dntWeight,
+  //     totalStaked(),
+  //     totalSupply()
+  //   );
+  // }
 
-  function loadStake(address _staker) public constant returns (uint, uint) {
-    return (
-      totalStakedFor(_staker),
-      balanceOf(_staker)
-    );
-  }
+  // function loadStake(address _staker) public constant returns (uint, uint) {
+  //   return (
+  //     totalStakedFor(_staker),
+  //     balanceOf(_staker)
+  //   );
+  // }
 
 }

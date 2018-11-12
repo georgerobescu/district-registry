@@ -46,7 +46,7 @@ contract StakeBank is StakeBankInterface {
         // The line above is the original StakeBank implementation, but we changed
         // `msg.sender` to `tx.origin` so that it works with `approveAndCall`.
 
-        Staked(user, amount, totalStakedFor(user), data);
+        emit Staked(user, amount, totalStakedFor(user), data);
     }
 
     /// @notice Unstakes a certain amount of tokens.
@@ -59,7 +59,7 @@ contract StakeBank is StakeBankInterface {
         updateStakeBankCheckpointAtNow(stakeHistory, amount, true);
 
         require(token.transfer(msg.sender, amount));
-        Unstaked(msg.sender, amount, totalStakedFor(msg.sender), data);
+        emit Unstaked(msg.sender, amount, totalStakedFor(msg.sender), data);
     }
 
     /// @notice Returns total tokens staked for address.

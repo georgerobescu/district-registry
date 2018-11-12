@@ -32,7 +32,7 @@
 
 (def districts-columns
   [[:reg-entry/address address not-nil]
-   [:district/info-hash ipfs-hash]
+   [:district/meta-hash ipfs-hash]
    [:district/name :string]
    [:district/description :string]
    [:district/url :string]

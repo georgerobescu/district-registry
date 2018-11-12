@@ -1,4 +1,4 @@
-pragma solidity ^0.4.18;
+pragma solidity ^0.4.24;
 
 import "auth/DSAuth.sol";
 import "db/EternalDb.sol";
@@ -15,10 +15,35 @@ import "proxy/MutableForwarder.sol"; // Keep it included despite not being used 
 contract Registry is DSAuth {
   address public target; // Keep it here, because this contract is deployed as MutableForwarder
 
+  // TODO remove
   event RegistryEntryEvent(address indexed registryEntry, bytes32 indexed eventType, uint version, uint timestamp, uint[] data);
 
+  // event MemeConstructedEvent(address registryEntry, uint version, address creator, bytes metaHash, uint totalSupply, uint deposit, uint challengePeriodEnd);
+  // event MemeMintedEvent(address registryEntry, uint version, address creator, uint tokenStartId, uint tokenEndId, uint totalMinted);
+
+  event DistrictConstructedEvent(address registryEntry, uint version, address creator, bytes metaHash, uint deposit, uint challengePeriodEnd, uint32 dntWeight);
+  event DistrictStakeChangedEvent(address registryEntry, uint version, address creator, address staker, uint staked);
+
+  event ChallengeCreatedEvent(address registryEntry, uint version, address challenger, uint commitPeriodEnd, uint revealPeriodEnd, uint rewardPool, bytes metahash);
+  event VoteCommittedEvent(address registryEntry, uint version, address voter, uint amount);
+  event VoteRevealedEvent(address registryEntry, uint version, address voter, uint option);
+  event VoteAmountClaimedEvent(address registryEntry, uint version, address voter);
+  event VoteRewardClaimedEvent(address registryEntry, uint version, address voter, uint amount);
+  event ChallengeRewardClaimedEvent(address registryEntry, uint version, address challenger, uint amount);
+
+  event ParamChangeConstructedEvent(address registryEntry, uint version, address creator, address db, string key, uint value, uint deposit, uint challengePeriodEnd);
+
+  bytes32 public constant challengePeriodDurationKey = keccak256("challengePeriodDuration");
+  bytes32 public constant commitPeriodDurationKey = keccak256("commitPeriodDuration");
+  bytes32 public constant revealPeriodDurationKey = keccak256("revealPeriodDuration");
+  bytes32 public constant depositKey = keccak256("deposit");
+  bytes32 public constant challengeDispensationKey = keccak256("challengeDispensation");
+  bytes32 public constant voteQuorumKey = keccak256("voteQuorum");
+  bytes32 public constant maxTotalSupplyKey = keccak256("maxTotalSupply");
+  bytes32 public constant maxAuctionDurationKey = keccak256("maxAuctionDuration");
+
   EternalDb public db;
-  bool wasConstructed;
+  bool private wasConstructed;
 
   /**
    * @dev Constructor for this contract.
@@ -27,25 +52,28 @@ contract Registry is DSAuth {
 
    * @param _db Address of EternalDb related to this registry
    */
-  function construct(EternalDb _db) {
-    require(address(_db) != 0x0);
+  function construct(EternalDb _db) 
+  external
+  {
+    require(address(_db) != 0x0, "Registry: Address can't be 0x0");
+
     db = _db;
     wasConstructed = true;
     owner = msg.sender;
   }
 
   modifier onlyFactory() {
-    require(isFactory(msg.sender));
+    require(isFactory(msg.sender), "Registry: Sender should be factory");
     _;
   }
 
   modifier onlyRegistryEntry() {
-    require(isRegistryEntry(msg.sender));
+    require(isRegistryEntry(msg.sender), "Registry: Sender should registry entry");
     _;
   }
 
   modifier notEmergency() {
-    require(!isEmergency());
+    require(!isEmergency(),"Registry: Emergency mode is enable");
     _;
   }
 
@@ -57,9 +85,10 @@ contract Registry is DSAuth {
    * @param _isFactory Whether the address is allowed factory
    */
   function setFactory(address _factory, bool _isFactory)
+  external
   auth
   {
-    db.setBooleanValue(sha3("isFactory", _factory), _isFactory);
+    db.setBooleanValue(keccak256("isFactory", _factory), _isFactory);
   }
 
   /**
@@ -69,10 +98,11 @@ contract Registry is DSAuth {
    * @param _registryEntry Address of new registry entry
    */
   function addRegistryEntry(address _registryEntry)
+  external
   onlyFactory
   notEmergency
   {
-    db.setBooleanValue(sha3("isRegistryEntry", _registryEntry), true);
+    db.setBooleanValue(keccak256("isRegistryEntry", _registryEntry), true);
   }
 
   /**
@@ -82,29 +112,10 @@ contract Registry is DSAuth {
    * @param _isEmergency True if emergency is happening
    */
   function setEmergency(bool _isEmergency)
+  external
   auth
   {
     db.setBooleanValue("isEmergency", _isEmergency);
-  }
-
-  function fireRegistryEntryEvent(bytes32 _eventType, uint _version)
-  onlyRegistryEntry
-  {
-    fireRegistryEntryEvent(_eventType, _version, new uint[](0));
-  }
-
-  /**
-   * @dev Fires event related to a registry entry
-   * Must be callable only by valid registry entry
-
-   * @param _eventType String identifying event type
-   * @param _version Version of registry entry contract
-   * @param _data Additional data related to event
-   */
-  function fireRegistryEntryEvent(bytes32 _eventType, uint _version, uint[] _data)
-  onlyRegistryEntry
-  {
-    RegistryEntryEvent(msg.sender, _eventType, _version, now, _data);
   }
 
   /**
@@ -113,7 +124,7 @@ contract Registry is DSAuth {
    * @return True if address is factory
    */
   function isFactory(address factory) public constant returns (bool) {
-    return db.getBooleanValue(sha3("isFactory", factory));
+    return db.getBooleanValue(keccak256("isFactory", factory));
   }
 
   /**
@@ -122,7 +133,7 @@ contract Registry is DSAuth {
    * @return True if address is registry entry
    */
   function isRegistryEntry(address registryEntry) public constant returns (bool) {
-    return db.getBooleanValue(sha3("isRegistryEntry", registryEntry));
+    return db.getBooleanValue(keccak256("isRegistryEntry", registryEntry));
   }
 
   /**
@@ -133,4 +144,83 @@ contract Registry is DSAuth {
   function isEmergency() public constant returns (bool) {
     return db.getBooleanValue("isEmergency");
   }
+
+
+  function fireDistrictConstructedEvent(uint version, address creator, bytes metaHash, uint deposit, uint challengePeriodEnd, uint32 dntWeight)
+  public
+  onlyRegistryEntry
+  {
+    emit DistrictConstructedEvent(msg.sender, version, creator, metaHash, deposit, challengePeriodEnd, dntWeight);
+  }
+
+  function fireDistrictStakeChangedEvent(uint version, address creator, address staker, uint staked)
+  public
+  onlyRegistryEntry
+  {
+    emit DistrictStakeChangedEvent(msg.sender, version, creator, staker, staked);
+  }
+
+  function fireChallengeCreatedEvent(uint version, address challenger, uint commitPeriodEnd, uint revealPeriodEnd, uint rewardPool, bytes metahash)
+  public
+  onlyRegistryEntry
+  {
+    emit ChallengeCreatedEvent(msg.sender, version,  challenger, commitPeriodEnd, revealPeriodEnd, rewardPool, metahash);
+  }
+
+  function fireVoteCommittedEvent(uint version, address voter, uint amount)
+  public
+  onlyRegistryEntry
+  {
+    emit VoteCommittedEvent(msg.sender, version, voter, amount);
+  }
+
+  function fireVoteRevealedEvent(uint version, address voter, uint option)
+  public
+  onlyRegistryEntry
+  {
+    emit VoteRevealedEvent(msg.sender, version, voter, option);
+  }
+
+  function fireVoteAmountClaimedEvent(uint version, address voter)
+  public
+  onlyRegistryEntry
+  {
+    emit VoteAmountClaimedEvent(msg.sender, version, voter);
+  }
+
+  function fireVoteRewardClaimedEvent(uint version, address voter, uint amount)
+  public
+  onlyRegistryEntry
+  {
+    emit VoteRewardClaimedEvent(msg.sender, version, voter, amount);
+  }
+
+  function fireChallengeRewardClaimedEvent(uint version, address challenger, uint amount)
+  public
+  onlyRegistryEntry
+  {
+    emit ChallengeRewardClaimedEvent(msg.sender, version, challenger, amount);
+  }
+
+  function fireParamChangeConstructedEvent(uint version, address creator, address _db, string key, uint value, uint deposit, uint challengePeriodEnd)
+  public
+  onlyRegistryEntry
+  {
+    emit ParamChangeConstructedEvent(msg.sender, version, creator, _db, key, value, deposit, challengePeriodEnd);
+  }
+
+
+// TODO remove
+  // function fireRegistryEntryEvent(bytes32 _eventType, uint _version)
+  // onlyRegistryEntry
+  // {
+  //   fireRegistryEntryEvent(_eventType, _version, new uint[](0));
+  // }
+  // function fireRegistryEntryEvent(bytes32 _eventType, uint _version, uint[] _data)
+  // onlyRegistryEntry
+  // {
+  //   emit RegistryEntryEvent(msg.sender, _eventType, _version, now, _data);
+  // }
+
 }
+

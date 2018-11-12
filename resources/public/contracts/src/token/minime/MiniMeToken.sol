@@ -170,7 +170,7 @@ contract MiniMeToken is Controlled {
   ) internal {
 
     if (_amount == 0) {
-      Transfer(_from, _to, _amount);    // Follow the spec to louch the event when transfer 0
+      emit Transfer(_from, _to, _amount);    // Follow the spec to louch the event when transfer 0
       return;
     }
 
@@ -201,7 +201,7 @@ contract MiniMeToken is Controlled {
     updateValueAtNow(balances[_to], previousBalanceTo + _amount);
 
     // An event to make the transfer easy to find on the blockchain
-    Transfer(_from, _to, _amount);
+    emit Transfer(_from, _to, _amount);
 
   }
 
@@ -232,7 +232,7 @@ contract MiniMeToken is Controlled {
     }
 
     allowed[msg.sender][_spender] = _amount;
-    Approval(msg.sender, _spender, _amount);
+    emit Approval(msg.sender, _spender, _amount);
     return true;
   }
 
@@ -363,7 +363,7 @@ contract MiniMeToken is Controlled {
     cloneToken.changeController(msg.sender);
 
     // An event to make the token easy to find on the blockchain
-    NewCloneToken(address(cloneToken), _snapshotBlock);
+    emit NewCloneToken(address(cloneToken), _snapshotBlock);
     return address(cloneToken);
   }
 
@@ -383,7 +383,7 @@ contract MiniMeToken is Controlled {
     require(previousBalanceTo + _amount >= previousBalanceTo); // Check for overflow
     updateValueAtNow(totalSupplyHistory, curTotalSupply + _amount);
     updateValueAtNow(balances[_owner], previousBalanceTo + _amount);
-    Transfer(0, _owner, _amount);
+    emit Transfer(0, _owner, _amount);
     return true;
   }
 
@@ -400,7 +400,7 @@ contract MiniMeToken is Controlled {
     require(previousBalanceFrom >= _amount);
     updateValueAtNow(totalSupplyHistory, curTotalSupply - _amount);
     updateValueAtNow(balances[_owner], previousBalanceFrom - _amount);
-    Transfer(_owner, 0, _amount);
+    emit Transfer(_owner, 0, _amount);
     return true;
   }
 
@@ -505,7 +505,7 @@ contract MiniMeToken is Controlled {
     MiniMeToken token = MiniMeToken(_token);
     uint balance = token.balanceOf(this);
     token.transfer(controller, balance);
-    ClaimedTokens(_token, controller, balance);
+    emit ClaimedTokens(_token, controller, balance);
   }
 
   ////////////////

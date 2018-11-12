@@ -10,6 +10,9 @@
 (defn set-factory [contract-key {:keys [:factory :factory?]} & [opts]]
   (contract-call contract-key :set-factory factory factory? (merge opts {:gas 100000})))
 
+(defn district-constructed-event [contract-key & args]
+  (apply contract-call contract-key :DistrictConstructedEvent args))
+
 (defn registry-entry-event [contract-key & args]
   (apply contract-call contract-key :RegistryEntryEvent args))
 
